@@ -1,0 +1,147 @@
+clc;
+clear all;
+close all;
+warning off all;
+
+[filename, pathname] = uigetfile({'*.*'},'Select A Video File'); 
+org_video = VideoReader([filename]);
+nFrames = org_video.numberofFrames;
+vidHeight =  org_video.Height;
+vidWidth =  org_video.Width;
+mov(1:nFrames) = ...
+    struct('cdata', zeros(vidHeight, vidWidth, 3, 'uint8'),...
+           'colormap', []);
+       
+% % % frame conversion
+for i=20:40
+    frames=read(org_video,i);    
+    frm_name=frame2im(mov(i));
+    mov(i).cdata=frm_name;
+    mov(i).cdata=imresize(mov(i).cdata,[256 256]);
+    filename1=strcat(strcat(num2str(i)),'.png');
+    figure(1);imshow(frames);
+    title(sprintf('Frame %d',i));
+    cd('Frames');
+    imwrite(frames,filename1);    
+    cd ..
+end
+for k=20:40
+    frames1=read(org_video,k);
+    c=rgb2gray(frames1);
+    img=imread('23.png');
+    x=rgb2gray(img);
+    a=imabsdiff(x,c);
+    g=imbinarize(a);
+    se=strel('disk',1);
+    h=imdilate(g,se); % % % morphological operations
+    d=imerode(h,se); 
+    filename1=strcat(strcat(num2str(k)),'.png');
+    figure(2);imshow(d);
+    title(sprintf('Frame %d',k));
+    cd('binary');
+    imwrite(d,filename1);
+    cd ..
+end
+
+% % % object recognition using gaussian mixture model
+blobAnalysis = vision.BlobAnalysis('BoundingBoxOutputPort', true, ...
+    'AreaOutputPort', false, 'CentroidOutputPort', false, ...
+    'MinimumBlobArea', 150);
+bbox = step(blobAnalysis, d);
+
+result = insertShape(frames, 'Rectangle', bbox, 'Color', 'green');
+objects = size(bbox, 1);
+result = insertText(result, [10 10], objects, 'BoxOpacity', 1, ...
+    'FontSize', 14);
+figure; imshow(result); title('Detected objs');
+
+% % % crop all the detected bounding boxes
+for i=1:objects
+obj=imcrop(img,bbox(i,:));
+handles.obj=obj;
+obj=imresize(obj,[256,256]);
+figure;imshow(obj);
+filename2=strcat(strcat(num2str(i)),'.jpg');
+% imwrite(obj,filename2);
+
+matlabroot=pwd;
+digitDatasetPath = fullfile(matlabroot,'dataset');
+imds1 = imageDatastore(digitDatasetPath, ...
+    'IncludeSubfolders',true,'LabelSource','foldernames');
+size(obj);
+net=alexnet;
+layers1 = net.Layers;
+layers1(23) = fullyConnectedLayer(2,'Name','fc');
+layers1(25) = classificationLayer('Name','CcL');
+
+imageSize1 = net.Layers(1).InputSize;
+augmentedTrainingSet1 = augmentedImageDatastore(imageSize1, imds1);
+
+options = trainingOptions('sgdm', ...
+    'InitialLearnRate',3e-4, ...
+    'MaxEpochs',20, ...
+    'MiniBatchSize',32,...
+    'ExecutionEnvironment','cpu');           
+convnet1 = trainNetwork(augmentedTrainingSet1,layers1,options);
+    
+I11=imresize(obj,[227,227]);
+YPred = classify(convnet1,I11);
+output=char(YPred);
+msgbox(output);
+
+x='valid'; 
+if contains (x,output)
+    matlabroot=pwd;
+digitDatasetPath = fullfile(matlabroot,'items');
+imds = imageDatastore(digitDatasetPath, ...
+    'IncludeSubfolders',true,'LabelSource','foldernames');
+size(obj);
+net=alexnet;
+layers = net.Layers;
+layers(23) = fullyConnectedLayer(4,'Name','fc');
+layers(25) = classificationLayer('Name','CcL');
+
+imageSize = net.Layers(1).InputSize;
+augmentedTrainingSet = augmentedImageDatastore(imageSize, imds);
+
+options = trainingOptions('sgdm', ...
+    'InitialLearnRate',3e-4, ...
+    'MaxEpochs',20, ...
+    'MiniBatchSize',32,...
+    'ExecutionEnvironment','cpu');           
+convnet2 = trainNetwork(augmentedTrainingSet,layers,options);
+    
+I11=imresize(obj,[227,227]);
+YPred = classify(convnet2,I11);
+output=char(YPred);
+msgbox(output);
+else
+end
+end
+
+aaa=obj;
+aa=imresize(aaa,[256 256]);
+u_bw_filename =im2bw((aa));
+
+b=I11;
+ bb=imresize(b,[256 256]);
+u_GT_filename = uint8(im2bw(bb));
+
+temp_obj_eval= objective_evaluation_core(u_bw_filename,u_GT_filename);
+disp('Accuracy--');
+disp(temp_obj_eval.Accuracy*100);
+
+disp('Precision--');
+disp(temp_obj_eval.Precision*100);
+
+disp('Recall--');
+disp(temp_obj_eval.Recall*100);
+
+disp('Fmeasure--');
+disp(temp_obj_eval.Fmeasure*100);
+
+disp('sensitivity--');
+disp(temp_obj_eval.Sensitivity*100 );
+
+disp('specificity--');
+disp(temp_obj_eval.Specificity*100);
